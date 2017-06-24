@@ -1,0 +1,76 @@
+#!/usr/bin/env ruby
+
+# dodgily manage archivesspace databases a bit
+
+require 'optparse'
+
+MYSQL_CMD = 'mysql -uroot'
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: asdb [options] [database]"
+
+  opts.on('-r', '--root ROOT_PW', 'Mysql root password') { |v| options[:root] = v }
+
+  opts.on('-d', '--database DATABASE', 'ArchivesSpace database name') { |v| options[:database] = v }
+
+  opts.on('-u', '--username USERNAME', 'Username to grant perms to when creating (default as)') { |v| options[:username] = v }
+  opts.on('-p', '--password PASSWORD', 'Password when creating (default as123)') { |v| options[:password] = v }
+
+  opts.on('-F', '--force', 'Force a drop if database already exists') { |v| options[:force] = v }
+  opts.on('-D', '--drop', 'Just drop the database') { |v| options[:drop] = v }
+
+  opts.on('-v', '--version', 'Show the current schema_info version number') { |v| options[:version] = v }
+
+  opts.on("-h", "--help", "Print this help") { puts opts; exit }
+end.parse!
+
+default_options = {
+  :username => 'as',
+  :password => 'as123',
+}
+
+options = default_options.merge(options)
+
+options[:database] ||= ARGV.pop
+
+ROOT = options[:root]
+
+def send_q(q, db = nil)
+  `echo "#{q}" | #{MYSQL_CMD} #{ROOT && '-p' + ROOT} #{db}`
+end
+
+unless options[:database]
+  dbs = send_q('show databases').split.drop(1).select{|db| send_q('show tables', db).match(/^deaccession$/)}
+  if options[:version]
+    puts dbs.map{|db| sprintf("%4d  %s", send_q('select * from schema_info', db).split[1], db)}
+  else
+    puts dbs
+  end
+  exit
+end
+
+if options[:drop]
+  send_q("drop database #{options[:database]}")
+  puts "Database '#{options[:database]}' dropped!"
+  exit
+end
+
+if options[:version]
+  puts send_q('select * from schema_info', options[:database]).split[1]
+  exit
+end
+
+if send_q('show databases').match(/^#{options[:database]}$/)
+  if options[:force]
+    send_q("drop database #{options[:database]}")
+    puts "Database '#{options[:database]}' dropped!"
+  else
+    puts "Database '#{options[:database]}' already exists. Use -F to force a drop before creating."
+    exit
+  end
+end
+
+send_q("create database #{options[:database]} default character set utf8;")
+send_q("grant all on #{options[:database]}.* to '#{options[:username]}'@'localhost' identified by '#{options[:password]}';")
+puts "Database '#{options[:database]}' created!"
